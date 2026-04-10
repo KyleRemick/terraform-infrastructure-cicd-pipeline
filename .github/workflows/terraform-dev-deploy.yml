@@ -1,0 +1,55 @@
+name: Terraform Dev Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-*.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: terraform-dev-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    name: Plan and Apply (dev)
+    runs-on: ubuntu-latest
+    environment: development
+
+    defaults:
+      run:
+        working-directory: terraform/environments/dev
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: us-east-1
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        run: terraform plan -input=false -var-file="dev.tfvars"
+
+      - name: Terraform apply
+        run: terraform apply -input=false -auto-approve -var-file="dev.tfvars"

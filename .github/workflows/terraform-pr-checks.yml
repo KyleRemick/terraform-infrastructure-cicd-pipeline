@@ -1,0 +1,70 @@
+name: Terraform PR Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-*.yml"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  terraform-checks:
+    name: Validate and Plan (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, prod]
+
+    defaults:
+      run:
+        working-directory: terraform/environments/${{ matrix.environment }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.54.0
+
+      - name: Run TFLint
+        run: |
+          tflint --init
+          tflint --recursive ../../
+
+      - name: Configure AWS credentials (OIDC)
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ matrix.environment == 'prod' && secrets.AWS_ROLE_ARN_PROD || secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: us-east-1
+
+      - name: Terraform fmt check
+        run: terraform fmt -check -recursive ../../
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        run: terraform plan -input=false -var-file="${{ matrix.environment }}.tfvars"
+
+      - name: Fork PR note
+        if: ${{ github.event.pull_request.head.repo.fork }}
+        run: echo "Fork PR detected. Plan is skipped because OIDC role assumption is restricted for external repositories."
